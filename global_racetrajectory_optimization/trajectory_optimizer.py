@@ -15,8 +15,24 @@ Luca Schwarzenbach
 Documentation:
 This is an adaption of the main_globaltraj.py file which allows to call a function to optimize a trajectory and returns
 the optimized trajectory, the track boundaries, and the lap time.
-"""        
-        
+"""
+
+# tph (<= 0.79, also master) keeps the 2nd lap after the backward pass of its closed velocity solver. The end of that
+# lap never sees the braking needed for the start of the next lap, so the profile jumps at the s=0 seam whenever a
+# braking zone starts shortly after it. Running the solver on two laps and keeping the first returned lap gives a lap
+# whose end did see the following lap.
+_tph_solver_fb_closed = getattr(tph.calc_vel_profile, '__solver_fb_closed')
+
+
+def _solver_fb_closed_seam_fix(p_ggv, radii, el_lengths, mu=None, **kwargs):
+    def double(a):
+        return None if a is None else np.concatenate((a, a), axis=0)
+    return _tph_solver_fb_closed(p_ggv=double(p_ggv), radii=double(radii), el_lengths=double(el_lengths),
+                                 mu=double(mu), **kwargs)[:radii.size]
+
+
+setattr(tph.calc_vel_profile, '__solver_fb_closed', _solver_fb_closed_seam_fix)
+
 def trajectory_optimizer(input_path: str,
                          track_name: str,
                          curv_opt_type: str,
@@ -29,7 +45,8 @@ def trajectory_optimizer(input_path: str,
     - input_path (str): The path to the directory with the input files.
     - track_name (str): The name of the track.
     - curv_opt_type (str): The type of curvature optimization to perform. Valid options are "shortest_path", "mincurv",
-                                                    "mincurv_iqp", and "mintime".
+                                                    "mincurv_iqp", "mintime", and "centerline" (no optimization, the
+                                                    preprocessed reference line gets the same velocity profile).
     - safety_width (float): The safety width for the trajectory. Default is 0.8.
     - plot (bool): Whether to plot the optimized trajectory. Default is False.
 
@@ -95,7 +112,7 @@ def trajectory_optimizer(input_path: str,
     # CHECK USER INPUT -------------------------------------------------------------------------------------------------
     # ------------------------------------------------------------------------------------------------------------------
 
-    if curv_opt_type not in ["shortest_path", "mincurv", "mincurv_iqp", "mintime"]:
+    if curv_opt_type not in ["shortest_path", "mincurv", "mincurv_iqp", "mintime", "centerline"]:
         raise IOError("Unknown optimization type!")
 
     # ------------------------------------------------------------------------------------------------------------------
@@ -309,9 +326,11 @@ def trajectory_optimizer(input_path: str,
         if a_interp_tmp is not None:
             a_interp = a_interp_tmp
 
+    elif curv_opt_type == 'centerline':
+        alpha_opt = np.zeros(reftrack_interp.shape[0])
+
     else:
         raise IOError('Unknown optimization type!')
-        # alpha_opt = np.zeros(reftrack_interp.shape[0])
 
     # ------------------------------------------------------------------------------------------------------------------
     # REOPTIMIZATION OF THE MINTIME SOLUTION ---------------------------------------------------------------------------
