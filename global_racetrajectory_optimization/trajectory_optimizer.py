@@ -18,7 +18,7 @@ the optimized trajectory, the track boundaries, and the lap time.
 """        
         
 def trajectory_optimizer(input_path: str,
-                         track_name: str,
+                         reftrack: np.ndarray,
                          curv_opt_type: str,
                          safety_width: float = 0.8,
                          plot: bool = False) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
@@ -27,9 +27,9 @@ def trajectory_optimizer(input_path: str,
 
     Parameters:
     - input_path (str): The path to the directory with the input files.
-    - track_name (str): The name of the track.
+    - reftrack (np.ndarray): The reference track (e.g. the centerline) as [x_m, y_m, w_tr_right_m, w_tr_left_m].
     - curv_opt_type (str): The type of curvature optimization to perform. Valid options are "shortest_path", "mincurv",
-                                                    "mincurv_iqp", and "mintime".
+                                                    and "mincurv_iqp" ("mintime" is not supported yet).
     - safety_width (float): The safety width for the trajectory. Default is 0.8.
     - plot (bool): Whether to plot the optimized trajectory. Default is False.
 
@@ -38,6 +38,7 @@ def trajectory_optimizer(input_path: str,
 
     Raises:
     - IOError: If the optimization type is unknown.
+    - NotImplementedError: For "mintime", which needs friction map files named after a track.
     - ValueError: If the vehicle parameter file does not exist or is empty.
 
     """
@@ -55,9 +56,6 @@ def trajectory_optimizer(input_path: str,
     
     # vehicle parameter file -------------------------------------------------------------------------------------------
     file_paths = {"veh_params_file": "racecar_f110.ini"}
-
-    # track file (including centerline coordinates + track widths) -----------------------------------------------------
-    file_paths["track_name"] = track_name
 
     # set import options -----------------------------------------------------------------------------------------------
     imp_opts = {"flip_imp_track": False,                # flip imported track to reverse direction
@@ -98,6 +96,10 @@ def trajectory_optimizer(input_path: str,
     if curv_opt_type not in ["shortest_path", "mincurv", "mincurv_iqp", "mintime"]:
         raise IOError("Unknown optimization type!")
 
+    if curv_opt_type == "mintime":
+        # mintime reads friction maps named after a track (<track>_tpamap.csv), which the array input does not provide
+        raise NotImplementedError("mintime optimization is not supported yet")
+
     # ------------------------------------------------------------------------------------------------------------------
     # INITIALIZATION OF PATHS ------------------------------------------------------------------------------------------
     # ------------------------------------------------------------------------------------------------------------------
@@ -107,38 +109,6 @@ def trajectory_optimizer(input_path: str,
     
     # get current path
     file_paths["module"] = os.path.dirname(os.path.abspath(__file__))
-
-    # assemble track import path
-    file_paths["track_file"] = os.path.join(file_paths["track_name"] + ".csv")
-
-    # assemble friction map import paths
-    file_paths["tpamap"] = os.path.join(file_paths["inputs"], "frictionmaps",
-                                        file_paths["track_name"] + "_tpamap.csv")
-
-    if mintime_opts["tpadata"] is None:
-        file_paths["tpadata"] = os.path.join(file_paths["inputs"], "frictionmaps",
-                                             file_paths["track_name"] + "_tpadata.json")
-    else:
-        file_paths["tpadata"] = os.path.join(file_paths["inputs"], "frictionmaps", mintime_opts["tpadata"])
-
-    # check if friction map files are existing if the var_friction option was set
-    if curv_opt_type == 'mintime' \
-            and mintime_opts["var_friction"] is not None \
-            and not (os.path.exists(file_paths["tpadata"]) and os.path.exists(file_paths["tpamap"])):
-
-        mintime_opts["var_friction"] = None
-        print("WARNING: var_friction option is not None but friction map data is missing for current track -> Setting"
-              " var_friction to None!")
-        
-    # create outputs folder(s)
-    os.makedirs(file_paths["module"] + "/outputs", exist_ok=True)
-
-    if curv_opt_type == 'mintime':
-        os.makedirs(file_paths["module"] + "/outputs/mintime", exist_ok=True)
-
-    # assemble export paths
-    file_paths["traj_race_export"] = os.path.join(file_paths["module"], "outputs", "traj_race_cl.csv")
-    file_paths["mintime_export"] = os.path.join(file_paths["module"], "outputs", "mintime")
 
     # file_paths["traj_ltpl_export"] = os.path.join(file_paths["module"], "outputs", "traj_ltpl_cl.csv")
     file_paths["lap_time_mat_export"] = os.path.join(file_paths["module"], "outputs", lap_time_mat_opts["file"])
@@ -193,10 +163,12 @@ def trajectory_optimizer(input_path: str,
     # save start time
     t_start = time.perf_counter()
 
-    # import track
-    reftrack_imp = helper_funcs_glob.src.import_track.import_track(imp_opts=imp_opts,
-                                                                   file_path=file_paths["track_file"],
-                                                                   width_veh=pars["veh_params"]["width"])
+    # reference track [x_m, y_m, w_tr_right_m, w_tr_left_m] (with the import options above, import_track would only
+    # read it from a CSV file and warn about narrow tracks)
+    reftrack_imp = np.array(reftrack, dtype=float)
+    if np.amin(reftrack_imp[:, 2] + reftrack_imp[:, 3]) < pars["veh_params"]["width"] + 0.5:
+        print("WARNING: Minimum track width %.2fm is close to or smaller than vehicle width!"
+              % np.amin(reftrack_imp[:, 2] + reftrack_imp[:, 3]))
 
     # import ggv and ax_max_machines (if required)
     if not (curv_opt_type == 'mintime' and not mintime_opts["recalc_vel_profile_by_tph"]):
@@ -503,6 +475,7 @@ def trajectory_optimizer(input_path: str,
                 lap_time_matrix[i + 1, j + 1] = t_profile_cl[-1]
                 
         # store lap time matrix to file
+        os.makedirs(os.path.dirname(file_paths["lap_time_mat_export"]), exist_ok=True)
         np.savetxt(file_paths["lap_time_mat_export"], lap_time_matrix, delimiter=",", fmt="%.3f")
 
     # ------------------------------------------------------------------------------------------------------------------
