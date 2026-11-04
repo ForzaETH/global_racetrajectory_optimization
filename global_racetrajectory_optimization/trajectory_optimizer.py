@@ -37,7 +37,8 @@ def trajectory_optimizer(input_path: str,
                          track_name: str,
                          curv_opt_type: str,
                          safety_width: float = 0.8,
-                         plot: bool = False) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+                         plot: bool = False,
+                         veh_params: dict = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
     """
     Optimizes a trajectory based on the given input parameters.
 
@@ -49,6 +50,7 @@ def trajectory_optimizer(input_path: str,
                                                     preprocessed reference line gets the same velocity profile).
     - safety_width (float): The safety width for the trajectory. Default is 0.8.
     - plot (bool): Whether to plot the optimized trajectory. Default is False.
+    - veh_params (dict): Per-car overrides for the veh_params of the parameter file (e.g. mass, v_max, curvlim).
 
     Returns:
     - Tuple[np.ndarray, np.ndarray, np.ndarray, float]: A tuple containing the optimized trajectory, the track boundaries, and the lap time.
@@ -176,6 +178,8 @@ def trajectory_optimizer(input_path: str,
     pars["stepsize_opts"] = json.loads(parser.get('GENERAL_OPTIONS', 'stepsize_opts'))
     pars["reg_smooth_opts"] = json.loads(parser.get('GENERAL_OPTIONS', 'reg_smooth_opts'))
     pars["veh_params"] = json.loads(parser.get('GENERAL_OPTIONS', 'veh_params'))
+    if veh_params:
+        pars["veh_params"].update(veh_params)
     pars["vel_calc_opts"] = json.loads(parser.get('GENERAL_OPTIONS', 'vel_calc_opts'))
 
     if curv_opt_type == 'shortest_path':
